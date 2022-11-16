@@ -13,10 +13,10 @@ struct ContentView: View {
     @ObservedObject var ad = AdvertisingProvider.shared
     
     @State var isInterstitialTapped: Bool = false
-    @State var isRewardedTapped: Bool = false
-    @State var isNativeTapped: Bool = false
     
     private func setTimerForInterstitial() {
+        isInterstitialTapped = true
+        
         Timer.scheduledTimer(withTimeInterval: 60.0, repeats: false, block: { _ in
             isInterstitialTapped = false
         })
@@ -31,19 +31,20 @@ struct ContentView: View {
                     HStack(spacing: 15) {
                         AdButtonView(title: "Banners") {
                             if ad.isBannerReady {
-                                ad.isBannerShown = true
+                                ad.presentBanner()
                             }
+                            ad.bannerCounter += 1
                         }
-                        .opacity(ad.isBannerReady ? 1 : 0.8)
-                        .disabled(!ad.isBannerReady)
+                        .opacity((ad.isBannerReady && ad.bannerCounter < 5) ? 1 : 0.8)
+                        .disabled(!ad.isBannerReady || ad.bannerCounter >= 5)
                         
                         AdButtonView(title: "Interstitials") {
                             if ad.isInterstitialReady {
-                                ad.presentInterstitial()
-                                isInterstitialTapped = true
-                                ad.isBannerShown = false
                                 setTimerForInterstitial()
+                                ad.presentInterstitial()
                             }
+                            
+                            ad.hideTopBanner()
                         }
                         .opacity((ad.isInterstitialReady && !isInterstitialTapped) ? 1 : 0.8)
                         .disabled(!ad.isInterstitialReady || isInterstitialTapped)
@@ -53,15 +54,19 @@ struct ContentView: View {
                         AdButtonView(title: "Rewarded Video") {
                             if ad.isRewardedReady {
                                 ad.presentRewarded()
-                                isRewardedTapped = true
-                                ad.isBannerShown = false
                             }
+                            ad.rewardedCounter += 1
+                            
+                            ad.hideTopBanner()
                         }
-                        .opacity(ad.isRewardedReady ? 1 : 0.9)
-                        .disabled(!ad.isRewardedReady)
+                        .opacity((ad.isRewardedReady && ad.rewardedCounter < 3) ? 1 : 0.8)
+                        .disabled(!ad.isRewardedReady || ad.rewardedCounter >= 3)
                         
                         NavigationLink {
                             NewsFeed()
+                                .onAppear {
+                                    ad.hideTopBanner()
+                                }
                         } label: {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 16)
@@ -75,23 +80,13 @@ struct ContentView: View {
                             .disabled(!ad.isAdInitialised)
                         }
                         .onTapGesture {
-                            ad.isBannerShown = false
+                            ad.hideTopBanner()
                         }
                     } // HSTACK
                     
                     Spacer()
                 } // VSTACK
                 .padding(.horizontal)
-                
-                if ad.isBannerReady && ad.isBannerShown {
-                    AdvertisingProvider.Banner()
-                        .frame(
-                            minWidth: 320,
-                            idealWidth: .infinity,
-                            minHeight: ad.bannerHeight,
-                            maxHeight: ad.bannerHeight
-                        )
-                }
             } // ZSTACK
         } // NAV
     }

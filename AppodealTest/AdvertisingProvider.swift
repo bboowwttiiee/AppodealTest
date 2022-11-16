@@ -11,29 +11,18 @@ import Appodeal
 
 final class AdvertisingProvider: NSObject, ObservableObject {
     // MARK: Types and definitions
-    private typealias SynchroniseConsentCompletion = () -> Void
+    private typealias SynchroniseConsentCompletion = () -> ()
     
     /// Constants
     private struct AppodealConstants {
         static let key: String = "ac4b2540bd0186cf1950793234646a6820c9032d70531411"
-        static let adTypes: AppodealAdType = [.interstitial, .rewardedVideo, .banner, .nativeAd]
+        static let adTypes: AppodealAdType = [.banner, .interstitial, .rewardedVideo, .nativeAd]
         static let logLevel: APDLogLevel = .debug
         static let testMode: Bool = true
-        static let placement: String = "default"
-    }
-    
-    /// APDBannerView SwiftUI interface
-    struct Banner: UIViewRepresentable {
-        typealias UIViewType = APDBannerView
-        
-        func makeUIView(context: UIViewRepresentableContext<Banner>) -> APDBannerView {
-            // Use shared banner view to
-            return AdvertisingProvider.shared.bannerView
-        }
-        
-        func updateUIView(_ uiView: APDBannerView, context: UIViewRepresentableContext<Banner>) {
-            uiView.rootViewController = UIApplication.shared.rootViewController
-        }
+        static let defaultPlacement: String = "default"
+        static let bannerPlacement: String = "bannerRestriction"
+        static let rewardedPlacement: String = "rewardedRestriction"
+        static let interstitialPlacement: String = "interstitialRestriction"
     }
     
     /// Native view SwiftUI interface
@@ -54,7 +43,7 @@ final class AdvertisingProvider: NSObject, ObservableObject {
         
         private func uiView(for viewController: UIViewController) -> NativeView? {
             return try? ad.getViewForPlacement(
-                AdvertisingProvider.AppodealConstants.placement,
+                AdvertisingProvider.AppodealConstants.defaultPlacement,
                 withRootViewController: viewController
             ) as? NativeView
         }
@@ -66,37 +55,14 @@ final class AdvertisingProvider: NSObject, ObservableObject {
     
     private var synchroniseConsentCompletion: SynchroniseConsentCompletion?
     
-    let bannerHeight: CGFloat = {
-        kAPDAdSize320x50.height
-    }()
-    
-    fileprivate lazy var bannerView: APDBannerView = {
-        // Select banner ad size by current interface idiom
-        let adSize = kAPDAdSize320x50
-        
-        let banner = APDBannerView(
-            size:  adSize,
-            rootViewController: UIApplication.shared.rootViewController ?? UIViewController()
-        )
-        // Set banner initial frame
-        banner.frame = CGRect(
-            x: 0,
-            y: 0,
-            width: adSize.width,
-            height: adSize.height
-        )
-        
-        banner.delegate = self
-        
-        return banner
-    }()
-    
     // MARK: Published properties
     @Published var isAdInitialised     = false
     @Published var isBannerReady       = false
-    @Published var isBannerShown       = false
     @Published var isInterstitialReady = false
     @Published var isRewardedReady     = false
+    
+    @Published var bannerCounter       = 0
+    @Published var rewardedCounter     = 0
     
     // MARK: Public methods
     func initialize() {
@@ -112,34 +78,52 @@ final class AdvertisingProvider: NSObject, ObservableObject {
         /// User Data
         // Appodeal.setUserId("userID")
         
-        // Disable autocache for banner and native ad
+        // Disable autocache for banner
         // we will cache it manually
-        Appodeal.setAutocache(false, types: [.banner, .nativeAd])
+        Appodeal.setAutocache(false, types: .nativeAd)
         
         // Set delegates
+        Appodeal.setBannerDelegate(self)
         Appodeal.setInterstitialDelegate(self)
         Appodeal.setRewardedVideoDelegate(self)
         Appodeal.setInitializationDelegate(self)
         
+        Appodeal.setBannerAnimationEnabled(true)
+
         // Initialise Appodeal SDK
         Appodeal.initialize(withApiKey: AppodealConstants.key, types: AppodealConstants.adTypes)
+    }
+    
+    func presentBanner() {
+        defer { isBannerReady = false }
+        // Check availability of banner
+        guard
+            Appodeal.canShow(.banner, forPlacement: AppodealConstants.bannerPlacement),
+            let viewController = UIApplication.shared.rootViewController
+        else { return }
         
-        // Trigger banner cache
-        // It can be done after any moment after Appodeal initialisation
-        bannerView.loadAd()
+        Appodeal.showAd(
+            .bannerTop,
+            forPlacement: AppodealConstants.bannerPlacement,
+            rootViewController: viewController
+        )
+    }
+    
+    func hideTopBanner() {
+        Appodeal.hideBanner()
     }
     
     func presentInterstitial() {
         defer { isInterstitialReady = false }
         // Check availability of interstial
         guard
-            Appodeal.canShow(.interstitial, forPlacement: AppodealConstants.placement),
+            Appodeal.canShow(.interstitial, forPlacement: AppodealConstants.interstitialPlacement),
             let viewController = UIApplication.shared.rootViewController
         else { return }
         
         Appodeal.showAd(
             .interstitial,
-            forPlacement: AppodealConstants.placement,
+            forPlacement: AppodealConstants.interstitialPlacement,
             rootViewController: viewController
         )
     }
@@ -148,13 +132,13 @@ final class AdvertisingProvider: NSObject, ObservableObject {
         defer { isRewardedReady = false }
         // Check availability of rewarded video
         guard
-            Appodeal.canShow(.rewardedVideo, forPlacement: AppodealConstants.placement),
+            Appodeal.canShow(.rewardedVideo, forPlacement: AppodealConstants.rewardedPlacement),
             let viewController = UIApplication.shared.rootViewController
         else { return }
         
         Appodeal.showAd(
             .rewardedVideo,
-            forPlacement: AppodealConstants.placement,
+            forPlacement: AppodealConstants.rewardedPlacement,
             rootViewController: viewController
         )
     }
@@ -168,18 +152,16 @@ extension AdvertisingProvider: AppodealInitializationDelegate {
     }
 }
 
-extension AdvertisingProvider: APDBannerViewDelegate {
-    func bannerViewDidLoadAd(
-        _ bannerView: APDBannerView,
-        isPrecache precache: Bool
-    ) {
+extension AdvertisingProvider: AppodealBannerDelegate {
+    func bannerDidLoadAdIsPrecache(_ precache: Bool) {
         isBannerReady = true
     }
     
-    func bannerView(
-        _ bannerView: APDBannerView,
-        didFailToLoadAdWithError error: Error
-    ) {
+    func bannerDidFailToLoadAd() {
+        isBannerReady = false
+    }
+    
+    func bannerDidExpired() {
         isBannerReady = false
     }
 }
